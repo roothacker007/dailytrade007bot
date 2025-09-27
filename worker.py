@@ -7,9 +7,10 @@ from indicators import rsi, ema
 from colorama import Fore, init
 import pytz  # for timezone
 
-init(autoreset=True)  # enable colors
+# Enable colored output
+init(autoreset=True)
 
-print(Fore.YELLOW + "🚀 Starting DailyTrade3bot...\n")
+print(Fore.YELLOW + "🚀 Starting Currency Tracker by Professor007...\n")
 
 # ================== ENV LOADER ==================
 def env(key, default=None, cast=str):
@@ -20,7 +21,10 @@ def env(key, default=None, cast=str):
 TELEGRAM_BOT_TOKEN = env("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = env("TELEGRAM_CHAT_ID")
 
-SYMBOLS = [s.strip() for s in env("BINANCE_SYMBOLS", "BTCUSDT,ETHUSDT,BNBUSDT,SOLUSDT,XRPUSDT").split(",") if s.strip()]
+SYMBOLS = [s.strip() for s in env(
+    "BINANCE_SYMBOLS",
+    "BTCUSDT,ETHUSDT,BNBUSDT,SOLUSDT,XRPUSDT"
+).split(",") if s.strip()]
 INTERVAL = env("BINANCE_INTERVAL", "15m")
 CHECK_INTERVAL = env("CHECK_INTERVAL_SECONDS", 60, int)
 
@@ -30,11 +34,15 @@ EMA_FAST = env("EMA_FAST", 50, int)
 EMA_SLOW = env("EMA_SLOW", 200, int)
 VOLUME_MULTIPLIER = float(env("VOLUME_MULTIPLIER", "1.5"))
 
+# Heartbeat Interval (seconds) – default 900s = 15min
+HEARTBEAT_INTERVAL = env("HEARTBEAT_INTERVAL", 900, int)
+
 BINANCE_KLINES = "https://api.binance.com/api/v3/klines"
 
 # Dhaka timezone
 DHAKA_TZ = pytz.timezone("Asia/Dhaka")
 
+# ================== DATA FETCH ==================
 def fetch_klines(symbol: str, interval: str, limit: int = 400):
     params = {"symbol": symbol, "interval": interval, "limit": limit}
     resp = requests.get(BINANCE_KLINES, params=params, timeout=10)
@@ -60,6 +68,7 @@ def fetch_klines(symbol: str, interval: str, limit: int = 400):
     )
     return df
 
+# ================== TELEGRAM SENDER ==================
 def send_telegram(msg: str):
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
         print(Fore.RED + "Telegram not configured.")
@@ -71,6 +80,7 @@ def send_telegram(msg: str):
     except Exception as e:
         print(Fore.RED + "Telegram send error:", e)
 
+# ================== SIGNAL GENERATOR ==================
 def make_signal(symbol: str, df: pd.DataFrame):
     df = df.copy()
     df["rsi"] = rsi(df["close"], 14)
@@ -133,9 +143,12 @@ def make_signal(symbol: str, df: pd.DataFrame):
     )
     return msg
 
+# ================== MAIN LOOP ==================
 def main():
-    print(Fore.YELLOW + f"Starting Currency Tracker by Professor007 for {SYMBOLS} @ {INTERVAL} ...")
+    print(Fore.YELLOW + f"Starting multi-symbol worker for {SYMBOLS} @ {INTERVAL} ...")
     last_sent = {}
+    last_heartbeat = 0  # Track last heartbeat time
+
     while True:
         try:
             for sym in SYMBOLS:
@@ -143,14 +156,29 @@ def main():
                     df = fetch_klines(sym, INTERVAL, limit=400)
                     sig = make_signal(sym, df)
                     now = int(time.time())
-                    if sig and now - last_sent.get(sym, 0) >= CHECK_INTERVAL//2:
+
+                    # === SEND TRADING SIGNAL ===
+                    if sig and now - last_sent.get(sym, 0) >= CHECK_INTERVAL // 2:
                         print(Fore.YELLOW + sig + "\n")
                         send_telegram(sig)
                         last_sent[sym] = now
+
+                    # Small pause to avoid Binance rate-limit
                     time.sleep(0.3)
+
                 except Exception as e:
                     print(Fore.RED + f"{sym} error: {e}")
+
+            # === HEARTBEAT: send every HEARTBEAT_INTERVAL ===
+            now = int(time.time())
+            if now - last_heartbeat >= HEARTBEAT_INTERVAL:
+                hb_msg = f"✅ BOT is Running by Professor007\n⏰ {datetime.now(DHAKA_TZ).strftime('%Y-%m-%d %I:%M %p (Dhaka)')}"
+                send_telegram(hb_msg)
+                print(Fore.GREEN + "[HEARTBEAT] " + hb_msg + "\n")
+                last_heartbeat = now
+
             time.sleep(CHECK_INTERVAL)
+
         except KeyboardInterrupt:
             break
         except Exception as e:
